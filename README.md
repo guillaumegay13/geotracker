@@ -2,6 +2,8 @@
 
 Track your website's visibility in AI responses. Monitor how often AI models mention or cite your domain when answering relevant prompts.
 
+![Dashboard](./public/dashboard.png)
+
 ## Features
 
 - Track mentions and citations across multiple AI providers (OpenAI, Anthropic, Perplexity)
