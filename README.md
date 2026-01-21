@@ -1,37 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GEO Tracker
 
-## Getting Started
+Track your website's visibility in AI responses. Monitor how often AI models mention or cite your domain when answering relevant prompts.
 
-First, run the development server:
+## Features
+
+- Track mentions and citations across multiple AI providers (OpenAI, Anthropic, Perplexity)
+- Create and manage prompt libraries
+- View detailed run history with response analysis
+- Dashboard with visibility metrics
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Run the development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Configure settings
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Go to **Settings**
+2. Enter your tracked domain (e.g., `example.com`)
+3. Add API keys for the providers you want to use:
+   - OpenAI API key
+   - Anthropic API key
+   - Perplexity API key
 
-## Learn More
+### 4. Create prompts
 
-To learn more about Next.js, take a look at the following resources:
+1. Go to **Prompts**
+2. Add prompts that are relevant to your domain
+3. Example: "What are the best tools for X?" where X relates to your product
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 5. Run tracking
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Go to **Runs**
+2. Select a prompt and choose models to test
+3. Execute and view results
 
-## Deploy on Vercel
+## Tech Stack
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Next.js 15
+- SQLite (better-sqlite3)
+- Tailwind CSS
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# geotracker
+## Data Storage
+
+All data is stored locally in a SQLite database (`geotracker.db`). API keys are stored in this database - do not share the `.db` file.
+
+## License
+
+MIT
