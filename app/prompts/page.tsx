@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Prompt, CollectionWithPrompts } from '@/lib/types';
+
+const PROMPT_LIST_LIMIT = 200;
 
 export default function PromptsPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -12,11 +14,12 @@ export default function PromptsPage() {
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [newCollection, setNewCollection] = useState('');
+  const [promptQuery, setPromptQuery] = useState('');
   const [showNewCollectionInput, setShowNewCollectionInput] = useState(false);
 
   const loadData = async () => {
     const [promptsRes, collectionsRes] = await Promise.all([
-      fetch('/api/prompts').then((r) => r.json()),
+      fetch(`/api/prompts?limit=${PROMPT_LIST_LIMIT}`).then((r) => r.json()),
       fetch('/api/collections').then((r) => r.json()),
     ]);
     setPrompts(Array.isArray(promptsRes) ? promptsRes : []);
@@ -127,9 +130,28 @@ export default function PromptsPage() {
     }
   };
 
-  const getCollectionsForPrompt = (promptId: number) => {
-    return collections.filter((c) => c.prompt_ids.includes(promptId));
-  };
+  const collectionNamesByPrompt = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const collection of collections) {
+      for (const promptId of collection.prompt_ids) {
+        const names = map.get(promptId) || [];
+        names.push(collection.name);
+        map.set(promptId, names);
+      }
+    }
+    return map;
+  }, [collections]);
+
+  const filteredPrompts = useMemo(() => {
+    const query = promptQuery.trim().toLowerCase();
+    if (!query) return prompts;
+
+    return prompts.filter((prompt) => {
+      const collectionNames = (collectionNamesByPrompt.get(prompt.id) || []).join(' ');
+      const source = `${prompt.name} ${prompt.content} ${prompt.category || ''} ${collectionNames}`.toLowerCase();
+      return source.includes(query);
+    });
+  }, [collectionNamesByPrompt, promptQuery, prompts]);
 
   if (loading) {
     return <div className="text-[--dim]">Loading...</div>;
@@ -146,6 +168,13 @@ export default function PromptsPage() {
           {showForm ? 'cancel' : '+ add'}
         </button>
       </div>
+      <input
+        type="text"
+        value={promptQuery}
+        onChange={(e) => setPromptQuery(e.target.value)}
+        placeholder="Search prompts..."
+        className="w-full"
+      />
 
       {showForm && (
         <div className="border border-[--dim] p-4 space-y-3">
@@ -260,11 +289,12 @@ export default function PromptsPage() {
         </div>
       )}
 
-      {prompts.length === 0 ? (
-        <p className="text-[--dim] text-sm">No prompts yet.</p>
+      {filteredPrompts.length === 0 ? (
+        <p className="text-[--dim] text-sm">{prompts.length === 0 ? 'No prompts yet.' : 'No prompts match your search.'}</p>
       ) : (
         <div className="space-y-2">
-          {prompts.map((prompt) => (
+          <p className="text-xs text-[--dim]">Showing latest {PROMPT_LIST_LIMIT} prompts</p>
+          {filteredPrompts.map((prompt) => (
             <div key={prompt.id} className="border border-[--dim] p-3 flex justify-between items-start gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -272,8 +302,8 @@ export default function PromptsPage() {
                   {prompt.category && (
                     <span className="text-xs text-[--cyan]">{prompt.category}</span>
                   )}
-                  {getCollectionsForPrompt(prompt.id).map((c) => (
-                    <span key={c.id} className="text-xs text-[--amber]">[{c.name}]</span>
+                  {(collectionNamesByPrompt.get(prompt.id) || []).map((name) => (
+                    <span key={`${prompt.id}-${name}`} className="text-xs text-[--amber]">[{name}]</span>
                   ))}
                 </div>
                 <p className="text-sm text-[--dim] truncate mt-1">{prompt.content}</p>

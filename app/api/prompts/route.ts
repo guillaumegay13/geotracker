@@ -2,10 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { Prompt } from '@/lib/types';
 
-export async function GET() {
+const DEFAULT_PROMPT_LIMIT = 200;
+const MAX_PROMPT_LIMIT = 500;
+
+function clampLimit(value: string | null): number {
+  if (!value) return DEFAULT_PROMPT_LIMIT;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_PROMPT_LIMIT;
+  return Math.min(MAX_PROMPT_LIMIT, Math.max(1, Math.floor(parsed)));
+}
+
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const limit = clampLimit(searchParams.get('limit'));
+
     const db = getDb();
-    const prompts = db.prepare('SELECT * FROM prompts ORDER BY created_at DESC').all() as Prompt[];
+    const prompts = db
+      .prepare('SELECT * FROM prompts ORDER BY created_at DESC LIMIT ?')
+      .all(limit) as Prompt[];
+
     return NextResponse.json(prompts);
   } catch (error) {
     console.error('Error fetching prompts:', error);

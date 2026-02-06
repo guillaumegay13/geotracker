@@ -29,6 +29,7 @@ export default function RootLayout({
                 <Link href="/" className="hover:text-[--green]">dashboard</Link>
                 <Link href="/prompts" className="hover:text-[--green]">prompts</Link>
                 <Link href="/runs" className="hover:text-[--green]">runs</Link>
+                <Link href="/history" className="hover:text-[--green]">history</Link>
                 <Link href="/settings" className="hover:text-[--green]">settings</Link>
               </div>
             </div>

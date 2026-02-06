@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { RunWithPrompt, Settings } from '@/lib/types';
 
+const DASHBOARD_RUN_LIMIT = 100;
+
 export default function Dashboard() {
   const [runs, setRuns] = useState<RunWithPrompt[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -11,7 +13,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/runs').then((r) => r.json()),
+      fetch(`/api/runs?limit=${DASHBOARD_RUN_LIMIT}`).then((r) => r.json()),
       fetch('/api/settings').then((r) => r.json()),
     ]).then(([runsData, settingsData]) => {
       setRuns(runsData);
@@ -98,7 +100,7 @@ export default function Dashboard() {
       <div>
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-sm text-[--dim]">Recent Runs</h2>
-          <Link href="/runs" className="text-sm">view all</Link>
+          <Link href="/history" className="text-sm">view all</Link>
         </div>
         {recentRuns.length === 0 ? (
           <p className="text-[--dim] text-sm">No runs yet. <Link href="/runs">Execute a run</Link></p>

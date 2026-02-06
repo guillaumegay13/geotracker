@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Prompt, RunWithPrompt, PROVIDERS, Provider, CollectionWithPrompts } from '@/lib/types';
+import { CollectionWithPrompts, Prompt, PROVIDERS, Provider } from '@/lib/types';
+
+const PROMPT_LIST_LIMIT = 200;
 
 function getRunStage(progress: number): string {
   if (progress < 14) return 'preparing run matrix';
@@ -13,38 +15,45 @@ function getRunStage(progress: number): string {
   return 'done';
 }
 
+function uniq(values: number[]): number[] {
+  return Array.from(new Set(values));
+}
+
 export default function RunsPage() {
   const searchParams = useSearchParams();
+  const collectionPrefilledRef = useRef(false);
+
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [collections, setCollections] = useState<CollectionWithPrompts[]>([]);
-  const [runs, setRuns] = useState<RunWithPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState(false);
   const [runProgress, setRunProgress] = useState(0);
   const [runJobCount, setRunJobCount] = useState(0);
+  const [promptQuery, setPromptQuery] = useState('');
   const [selectedPrompts, setSelectedPrompts] = useState<number[]>([]);
   const [selectedProviders, setSelectedProviders] = useState<{ provider: Provider; model: string }[]>([]);
-  const [expandedRun, setExpandedRun] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
-    const [promptsRes, collectionsRes, runsRes] = await Promise.all([
-      fetch('/api/prompts').then((r) => r.json()),
+    const [promptsRes, collectionsRes] = await Promise.all([
+      fetch(`/api/prompts?limit=${PROMPT_LIST_LIMIT}`).then((r) => r.json()),
       fetch('/api/collections').then((r) => r.json()),
-      fetch('/api/runs').then((r) => r.json()),
     ]);
 
     const parsedPrompts = Array.isArray(promptsRes) ? promptsRes : [];
     const parsedCollections = Array.isArray(collectionsRes) ? collectionsRes : [];
+
     setPrompts(parsedPrompts);
     setCollections(parsedCollections);
-    setRuns(Array.isArray(runsRes) ? runsRes : []);
 
     const collectionParam = searchParams.get('collection');
-    if (collectionParam) {
+    if (collectionParam && !collectionPrefilledRef.current) {
       const collectionId = Number(collectionParam);
       if (!Number.isNaN(collectionId)) {
         const collection = parsedCollections.find((item: CollectionWithPrompts) => item.id === collectionId);
-        if (collection) setSelectedPrompts(collection.prompt_ids);
+        if (collection) {
+          setSelectedPrompts(collection.prompt_ids);
+          collectionPrefilledRef.current = true;
+        }
       }
     }
 
@@ -72,6 +81,20 @@ export default function RunsPage() {
     return () => clearInterval(interval);
   }, [executing]);
 
+  const filteredPrompts = useMemo(() => {
+    const query = promptQuery.trim().toLowerCase();
+    if (!query) return prompts;
+
+    return prompts.filter((prompt) => {
+      const source = `${prompt.name} ${prompt.content} ${prompt.category || ''}`.toLowerCase();
+      return source.includes(query);
+    });
+  }, [promptQuery, prompts]);
+
+  const allModels = PROVIDERS.flatMap((provider) =>
+    provider.models.map((model) => ({ provider: provider.name, model }))
+  );
+
   const togglePrompt = (promptId: number) => {
     if (selectedPrompts.includes(promptId)) {
       setSelectedPrompts(selectedPrompts.filter((id) => id !== promptId));
@@ -80,28 +103,27 @@ export default function RunsPage() {
     }
   };
 
-  const toggleAllPrompts = () => {
-    if (selectedPrompts.length === prompts.length) {
-      setSelectedPrompts([]);
-    } else {
-      setSelectedPrompts(prompts.map((p) => p.id));
-    }
-  };
-
   const selectCollection = (collection: CollectionWithPrompts) => {
     setSelectedPrompts(collection.prompt_ids);
   };
 
+  const selectVisiblePrompts = () => {
+    setSelectedPrompts((prev) => uniq([...prev, ...filteredPrompts.map((prompt) => prompt.id)]));
+  };
+
+  const clearVisiblePrompts = () => {
+    const visibleIds = new Set(filteredPrompts.map((prompt) => prompt.id));
+    setSelectedPrompts((prev) => prev.filter((id) => !visibleIds.has(id)));
+  };
+
   const toggleProvider = (provider: Provider, model: string) => {
-    const exists = selectedProviders.find((p) => p.provider === provider && p.model === model);
+    const exists = selectedProviders.find((item) => item.provider === provider && item.model === model);
     if (exists) {
-      setSelectedProviders(selectedProviders.filter((p) => !(p.provider === provider && p.model === model)));
+      setSelectedProviders(selectedProviders.filter((item) => !(item.provider === provider && item.model === model)));
     } else {
       setSelectedProviders([...selectedProviders, { provider, model }]);
     }
   };
-
-  const allModels = PROVIDERS.flatMap((p) => p.models.map((m) => ({ provider: p.name, model: m })));
 
   const toggleAllModels = () => {
     if (selectedProviders.length === allModels.length) {
@@ -113,9 +135,11 @@ export default function RunsPage() {
 
   const handleExecute = async () => {
     if (selectedPrompts.length === 0 || selectedProviders.length === 0) return;
+
     setRunJobCount(selectedPrompts.length * selectedProviders.length);
     setRunProgress(3);
     setExecuting(true);
+
     try {
       const response = await fetch('/api/runs', {
         method: 'POST',
@@ -125,10 +149,10 @@ export default function RunsPage() {
           providers: selectedProviders,
         }),
       });
+
       if (response.ok) {
         setSelectedPrompts([]);
         setSelectedProviders([]);
-        loadData();
       }
     } catch (error) {
       console.error('Failed to execute run:', error);
@@ -146,53 +170,91 @@ export default function RunsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg">Runs</h1>
+      <h1 className="text-lg">Run</h1>
 
       <div className="border border-[--dim] p-4 space-y-4">
-        <div>
-          <div className="flex items-center justify-between mb-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
             <label className="text-sm text-[--dim]">Prompts</label>
-            <button
-              type="button"
-              onClick={toggleAllPrompts}
-              className="text-xs text-[--dim] hover:text-[--green] cursor-pointer"
-            >
-              {selectedPrompts.length === prompts.length ? 'Deselect All' : 'Select All'}
-            </button>
+            <span className="text-xs text-[--dim]">{selectedPrompts.length} selected</span>
           </div>
+
+          <input
+            type="text"
+            value={promptQuery}
+            onChange={(e) => setPromptQuery(e.target.value)}
+            placeholder="Search prompts..."
+            className="w-full"
+          />
+
           {collections.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {collections.map((c) => (
+            <div className="flex flex-wrap gap-2">
+              {collections.map((collection) => (
                 <button
                   type="button"
-                  key={c.id}
-                  onClick={() => selectCollection(c)}
+                  key={collection.id}
+                  onClick={() => selectCollection(collection)}
                   className="px-2 py-0.5 text-xs border border-[--amber] text-[--amber] hover:bg-[--amber] hover:text-[--bg] cursor-pointer"
                 >
-                  {c.name} ({c.prompt_ids.length})
+                  {collection.name} ({collection.prompt_ids.length})
                 </button>
               ))}
             </div>
           )}
-          <div className="flex flex-wrap gap-2">
-            {prompts.map((prompt) => {
-              const isSelected = selectedPrompts.includes(prompt.id);
-              return (
-                <button
-                  type="button"
-                  key={prompt.id}
-                  onClick={() => togglePrompt(prompt.id)}
-                  className="px-2 py-1 text-xs border cursor-pointer"
-                  style={{
-                    borderColor: isSelected ? 'var(--green)' : 'var(--dim)',
-                    color: isSelected ? 'var(--bg)' : 'var(--dim)',
-                    backgroundColor: isSelected ? 'var(--green)' : 'transparent',
-                  }}
-                >
-                  {prompt.name}
-                </button>
-              );
-            })}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={selectVisiblePrompts}
+              className="px-2 py-1 text-xs border border-[--dim] hover:border-[--green] cursor-pointer"
+            >
+              Select visible
+            </button>
+            <button
+              type="button"
+              onClick={clearVisiblePrompts}
+              className="px-2 py-1 text-xs border border-[--dim] hover:border-[--amber] cursor-pointer"
+            >
+              Clear visible
+            </button>
+            <p className="text-xs text-[--dim]">
+              Showing {filteredPrompts.length} / {prompts.length} (latest {PROMPT_LIST_LIMIT})
+            </p>
+          </div>
+
+          <div className="border border-[--dim] max-h-72 overflow-y-auto p-2 space-y-1">
+            {filteredPrompts.length === 0 ? (
+              <p className="text-xs text-[--dim] px-1 py-2">No prompts match your search.</p>
+            ) : (
+              filteredPrompts.map((prompt) => {
+                const isSelected = selectedPrompts.includes(prompt.id);
+                return (
+                  <button
+                    type="button"
+                    key={prompt.id}
+                    onClick={() => togglePrompt(prompt.id)}
+                    className="w-full text-left px-2 py-1 border cursor-pointer"
+                    style={{
+                      borderColor: isSelected ? 'var(--green)' : 'var(--dim)',
+                      color: isSelected ? 'var(--bg)' : 'var(--green)',
+                      backgroundColor: isSelected ? 'var(--green)' : 'transparent',
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs">{prompt.name}</span>
+                      {prompt.category && (
+                        <span className="text-[10px]" style={{ color: isSelected ? 'var(--bg)' : 'var(--cyan)' }}>
+                          {prompt.category}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] truncate" style={{ color: isSelected ? 'var(--bg)' : 'var(--dim)' }}>
+                      {prompt.content}
+                    </p>
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -213,7 +275,7 @@ export default function RunsPage() {
               <div className="flex flex-wrap gap-2 mt-1">
                 {provider.models.map((model) => {
                   const isSelected = selectedProviders.some(
-                    (p) => p.provider === provider.name && p.model === model
+                    (item) => item.provider === provider.name && item.model === model
                   );
                   return (
                     <button
@@ -244,6 +306,7 @@ export default function RunsPage() {
         >
           {executing ? 'Running...' : 'Run'}
         </button>
+
         {executing && (
           <div className="border border-[--dim] px-3 py-2 space-y-2">
             <p className="text-xs text-[--dim]">
@@ -259,65 +322,6 @@ export default function RunsPage() {
               />
             </div>
             <p className="text-xs text-[--green] text-right">{Math.round(runProgress)}%</p>
-          </div>
-        )}
-      </div>
-
-      <div>
-        <h2 className="text-sm text-[--dim] mb-3">History</h2>
-        {runs.length === 0 ? (
-          <p className="text-[--dim] text-sm">No runs yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {runs.map((run) => (
-              <div key={run.id} className="border border-[--dim]">
-                <div
-                  className="p-3 cursor-pointer flex justify-between items-center"
-                  onClick={() => setExpandedRun(expandedRun === run.id ? null : run.id)}
-                >
-                  <div>
-                    <span>{run.prompt_name}</span>
-                    <span className="text-[--dim] text-sm ml-2">{run.provider}/{run.model}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    {run.signals.mentioned && <span className="text-[--green]">mentioned</span>}
-                    {run.signals.cited && <span className="text-[--cyan]">cited</span>}
-                    {!run.signals.mentioned && !run.signals.cited && <span className="text-[--dim]">-</span>}
-                  </div>
-                </div>
-
-                {expandedRun === run.id && (
-                  <div className="border-t border-[--dim] p-3 space-y-3 text-sm">
-                    <div>
-                      <span className="text-[--dim]">prompt:</span>
-                      <pre className="mt-1 text-[--dim] whitespace-pre-wrap">{run.prompt_content}</pre>
-                    </div>
-                    <div>
-                      <span className="text-[--dim]">response:</span>
-                      <pre className="mt-1 whitespace-pre-wrap max-h-48 overflow-y-auto">{run.response}</pre>
-                    </div>
-                    {run.signals.context.length > 0 && (
-                      <div>
-                        <span className="text-[--dim]">context:</span>
-                        {run.signals.context.map((ctx, i) => (
-                          <p key={i} className="mt-1 text-[--amber]">{ctx}</p>
-                        ))}
-                      </div>
-                    )}
-                    {run.signals.urls.length > 0 && (
-                      <div>
-                        <span className="text-[--dim]">urls:</span>
-                        {run.signals.urls.map((url, i) => (
-                          <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block mt-1 break-all">
-                            {url}
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
         )}
       </div>
