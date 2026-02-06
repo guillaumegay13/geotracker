@@ -1,30 +1,71 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Prompt, RunWithPrompt, PROVIDERS, Provider } from '@/lib/types';
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Prompt, RunWithPrompt, PROVIDERS, Provider, CollectionWithPrompts } from '@/lib/types';
 
 export default function RunsPage() {
+  const searchParams = useSearchParams();
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [collections, setCollections] = useState<CollectionWithPrompts[]>([]);
   const [runs, setRuns] = useState<RunWithPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState(false);
-  const [selectedPrompt, setSelectedPrompt] = useState<number | null>(null);
+  const [selectedPrompts, setSelectedPrompts] = useState<number[]>([]);
   const [selectedProviders, setSelectedProviders] = useState<{ provider: Provider; model: string }[]>([]);
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
 
-  const loadData = async () => {
-    const [promptsRes, runsRes] = await Promise.all([
+  const loadData = useCallback(async () => {
+    const [promptsRes, collectionsRes, runsRes] = await Promise.all([
       fetch('/api/prompts').then((r) => r.json()),
+      fetch('/api/collections').then((r) => r.json()),
       fetch('/api/runs').then((r) => r.json()),
     ]);
-    setPrompts(promptsRes);
-    setRuns(runsRes);
+
+    const parsedPrompts = Array.isArray(promptsRes) ? promptsRes : [];
+    const parsedCollections = Array.isArray(collectionsRes) ? collectionsRes : [];
+    setPrompts(parsedPrompts);
+    setCollections(parsedCollections);
+    setRuns(Array.isArray(runsRes) ? runsRes : []);
+
+    const collectionParam = searchParams.get('collection');
+    if (collectionParam) {
+      const collectionId = Number(collectionParam);
+      if (!Number.isNaN(collectionId)) {
+        const collection = parsedCollections.find((item: CollectionWithPrompts) => item.id === collectionId);
+        if (collection) setSelectedPrompts(collection.prompt_ids);
+      }
+    }
+
     setLoading(false);
-  };
+  }, [searchParams]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    const run = async () => {
+      await loadData();
+    };
+    run();
+  }, [loadData]);
+
+  const togglePrompt = (promptId: number) => {
+    if (selectedPrompts.includes(promptId)) {
+      setSelectedPrompts(selectedPrompts.filter((id) => id !== promptId));
+    } else {
+      setSelectedPrompts([...selectedPrompts, promptId]);
+    }
+  };
+
+  const toggleAllPrompts = () => {
+    if (selectedPrompts.length === prompts.length) {
+      setSelectedPrompts([]);
+    } else {
+      setSelectedPrompts(prompts.map((p) => p.id));
+    }
+  };
+
+  const selectCollection = (collection: CollectionWithPrompts) => {
+    setSelectedPrompts(collection.prompt_ids);
+  };
 
   const toggleProvider = (provider: Provider, model: string) => {
     const exists = selectedProviders.find((p) => p.provider === provider && p.model === model);
@@ -35,20 +76,30 @@ export default function RunsPage() {
     }
   };
 
+  const allModels = PROVIDERS.flatMap((p) => p.models.map((m) => ({ provider: p.name, model: m })));
+
+  const toggleAllModels = () => {
+    if (selectedProviders.length === allModels.length) {
+      setSelectedProviders([]);
+    } else {
+      setSelectedProviders(allModels);
+    }
+  };
+
   const handleExecute = async () => {
-    if (!selectedPrompt || selectedProviders.length === 0) return;
+    if (selectedPrompts.length === 0 || selectedProviders.length === 0) return;
     setExecuting(true);
     try {
       const response = await fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt_id: selectedPrompt,
+          prompt_ids: selectedPrompts,
           providers: selectedProviders,
         }),
       });
       if (response.ok) {
-        setSelectedPrompt(null);
+        setSelectedPrompts([]);
         setSelectedProviders([]);
         loadData();
       }
@@ -68,21 +119,63 @@ export default function RunsPage() {
 
       <div className="border border-[--dim] p-4 space-y-4">
         <div>
-          <label className="block text-sm text-[--dim] mb-1">Prompt</label>
-          <select
-            value={selectedPrompt || ''}
-            onChange={(e) => setSelectedPrompt(e.target.value ? Number(e.target.value) : null)}
-            className="w-full"
-          >
-            <option value="">Select prompt...</option>
-            {prompts.map((prompt) => (
-              <option key={prompt.id} value={prompt.id}>{prompt.name}</option>
-            ))}
-          </select>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm text-[--dim]">Prompts</label>
+            <button
+              type="button"
+              onClick={toggleAllPrompts}
+              className="text-xs text-[--dim] hover:text-[--green] cursor-pointer"
+            >
+              {selectedPrompts.length === prompts.length ? 'Deselect All' : 'Select All'}
+            </button>
+          </div>
+          {collections.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {collections.map((c) => (
+                <button
+                  type="button"
+                  key={c.id}
+                  onClick={() => selectCollection(c)}
+                  className="px-2 py-0.5 text-xs border border-[--amber] text-[--amber] hover:bg-[--amber] hover:text-[--bg] cursor-pointer"
+                >
+                  {c.name} ({c.prompt_ids.length})
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {prompts.map((prompt) => {
+              const isSelected = selectedPrompts.includes(prompt.id);
+              return (
+                <button
+                  type="button"
+                  key={prompt.id}
+                  onClick={() => togglePrompt(prompt.id)}
+                  className="px-2 py-1 text-xs border cursor-pointer"
+                  style={{
+                    borderColor: isSelected ? 'var(--green)' : 'var(--dim)',
+                    color: isSelected ? 'var(--bg)' : 'var(--dim)',
+                    backgroundColor: isSelected ? 'var(--green)' : 'transparent',
+                  }}
+                >
+                  {prompt.name}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div>
-          <label className="block text-sm text-[--dim] mb-2">Models</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm text-[--dim]">Models</label>
+            <button
+              type="button"
+              onClick={toggleAllModels}
+              className="text-xs text-[--dim] hover:text-[--green] cursor-pointer"
+            >
+              {selectedProviders.length === allModels.length ? 'Deselect All' : 'Select All'}
+            </button>
+          </div>
           {PROVIDERS.map((provider) => (
             <div key={provider.name} className="mb-3">
               <span className="text-sm text-[--cyan]">{provider.displayName}</span>
@@ -93,13 +186,15 @@ export default function RunsPage() {
                   );
                   return (
                     <button
+                      type="button"
                       key={model}
                       onClick={() => toggleProvider(provider.name, model)}
-                      className={`px-2 py-1 text-xs border ${
-                        isSelected
-                          ? 'border-[--green] text-[--green]'
-                          : 'border-[--dim] text-[--dim] hover:border-[--green]'
-                      }`}
+                      className="px-2 py-1 text-xs border cursor-pointer"
+                      style={{
+                        borderColor: isSelected ? 'var(--green)' : 'var(--dim)',
+                        color: isSelected ? 'var(--bg)' : 'var(--dim)',
+                        backgroundColor: isSelected ? 'var(--green)' : 'transparent',
+                      }}
                     >
                       {model}
                     </button>
@@ -111,9 +206,10 @@ export default function RunsPage() {
         </div>
 
         <button
+          type="button"
           onClick={handleExecute}
-          disabled={executing || !selectedPrompt || selectedProviders.length === 0}
-          className="px-4 py-1 border border-[--green] hover:bg-[--green] hover:text-[--bg] disabled:opacity-50"
+          disabled={executing || selectedPrompts.length === 0 || selectedProviders.length === 0}
+          className="px-4 py-1 border border-[--green] hover:bg-[--green] hover:text-[--bg] disabled:opacity-50 cursor-pointer"
         >
           {executing ? 'Running...' : 'Run'}
         </button>

@@ -40,9 +40,6 @@ export async function POST(request: NextRequest) {
 
     const db = getDb();
 
-    // Get current settings to preserve existing keys if new ones not provided
-    const current = db.prepare('SELECT * FROM settings WHERE id = 1').get() as Settings | undefined;
-
     const updates: string[] = [];
     const values: (string | null)[] = [];
 

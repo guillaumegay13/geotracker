@@ -7,7 +7,7 @@ import { queryAnthropic } from '@/lib/providers/anthropic';
 import { queryPerplexity } from '@/lib/providers/perplexity';
 
 interface RunRequest {
-  prompt_id: number;
+  prompt_ids: number[];
   providers: { provider: Provider; model: string }[];
 }
 
@@ -40,21 +40,24 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body: RunRequest = await request.json();
-    const { prompt_id, providers } = body;
+    const { prompt_ids, providers } = body;
 
-    if (!prompt_id || !providers || providers.length === 0) {
-      return NextResponse.json({ error: 'prompt_id and providers are required' }, { status: 400 });
+    if (!prompt_ids || prompt_ids.length === 0 || !providers || providers.length === 0) {
+      return NextResponse.json({ error: 'prompt_ids and providers are required' }, { status: 400 });
     }
 
     const db = getDb();
 
-    // Get prompt
-    const prompt = db.prepare('SELECT * FROM prompts WHERE id = ?').get(prompt_id) as
-      | { id: number; content: string; name: string }
-      | undefined;
+    // Get all prompts
+    const placeholders = prompt_ids.map(() => '?').join(',');
+    const prompts = db.prepare(`SELECT * FROM prompts WHERE id IN (${placeholders})`).all(...prompt_ids) as {
+      id: number;
+      content: string;
+      name: string;
+    }[];
 
-    if (!prompt) {
-      return NextResponse.json({ error: 'Prompt not found' }, { status: 404 });
+    if (prompts.length === 0) {
+      return NextResponse.json({ error: 'No prompts found' }, { status: 404 });
     }
 
     // Get settings for API keys and tracked domain
@@ -62,54 +65,56 @@ export async function POST(request: NextRequest) {
 
     const results: RunWithPrompt[] = [];
 
-    // Execute queries in parallel
-    const promises = providers.map(async ({ provider, model }) => {
-      let apiKey: string | null = null;
-      let queryFn: (key: string, prompt: string, model: string) => Promise<string>;
+    // Execute all prompt+model combinations in parallel
+    const promises = prompts.flatMap((prompt) =>
+      providers.map(async ({ provider, model }) => {
+        let apiKey: string | null = null;
+        let queryFn: (key: string, prompt: string, model: string) => Promise<string>;
 
-      switch (provider) {
-        case 'openai':
-          apiKey = settings.openai_api_key;
-          queryFn = queryOpenAI;
-          break;
-        case 'anthropic':
-          apiKey = settings.anthropic_api_key;
-          queryFn = queryAnthropic;
-          break;
-        case 'perplexity':
-          apiKey = settings.perplexity_api_key;
-          queryFn = queryPerplexity;
-          break;
-        default:
-          throw new Error(`Unknown provider: ${provider}`);
-      }
+        switch (provider) {
+          case 'openai':
+            apiKey = settings.openai_api_key;
+            queryFn = queryOpenAI;
+            break;
+          case 'anthropic':
+            apiKey = settings.anthropic_api_key;
+            queryFn = queryAnthropic;
+            break;
+          case 'perplexity':
+            apiKey = settings.perplexity_api_key;
+            queryFn = queryPerplexity;
+            break;
+          default:
+            throw new Error(`Unknown provider: ${provider}`);
+        }
 
-      if (!apiKey) {
-        throw new Error(`API key not configured for ${provider}`);
-      }
+        if (!apiKey) {
+          throw new Error(`API key not configured for ${provider}`);
+        }
 
-      // Query the AI provider
-      const response = await queryFn(apiKey, prompt.content, model);
+        // Query the AI provider
+        const response = await queryFn(apiKey, prompt.content, model);
 
-      // Extract signals
-      const signals = extractSignals(response, settings.tracked_domain);
+        // Extract signals
+        const signals = extractSignals(response, settings.tracked_domain);
 
-      // Store the run
-      const result = db
-        .prepare('INSERT INTO runs (prompt_id, provider, model, response, signals) VALUES (?, ?, ?, ?, ?)')
-        .run(prompt_id, provider, model, response, JSON.stringify(signals));
+        // Store the run
+        const result = db
+          .prepare('INSERT INTO runs (prompt_id, provider, model, response, signals) VALUES (?, ?, ?, ?, ?)')
+          .run(prompt.id, provider, model, response, JSON.stringify(signals));
 
-      const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(result.lastInsertRowid) as Run & {
-        signals: string;
-      };
+        const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(result.lastInsertRowid) as Run & {
+          signals: string;
+        };
 
-      return {
-        ...run,
-        signals: JSON.parse(run.signals) as Signal,
-        prompt_name: prompt.name,
-        prompt_content: prompt.content,
-      };
-    });
+        return {
+          ...run,
+          signals: JSON.parse(run.signals) as Signal,
+          prompt_name: prompt.name,
+          prompt_content: prompt.content,
+        };
+      })
+    );
 
     const completedRuns = await Promise.allSettled(promises);
 

@@ -15,6 +15,16 @@ export interface Prompt {
   created_at: string;
 }
 
+export interface Collection {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export interface CollectionWithPrompts extends Collection {
+  prompt_ids: number[];
+}
+
 export interface Signal {
   mentioned: boolean;
   cited: boolean;

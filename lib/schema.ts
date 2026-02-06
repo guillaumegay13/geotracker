@@ -18,6 +18,20 @@ CREATE TABLE IF NOT EXISTS prompts (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Prompt collections
+CREATE TABLE IF NOT EXISTS collections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Prompt-collection junction table
+CREATE TABLE IF NOT EXISTS prompt_collections (
+  prompt_id INTEGER REFERENCES prompts(id) ON DELETE CASCADE,
+  collection_id INTEGER REFERENCES collections(id) ON DELETE CASCADE,
+  PRIMARY KEY (prompt_id, collection_id)
+);
+
 -- Run history
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
