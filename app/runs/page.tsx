@@ -4,6 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Prompt, RunWithPrompt, PROVIDERS, Provider, CollectionWithPrompts } from '@/lib/types';
 
+function getRunStage(progress: number): string {
+  if (progress < 14) return 'preparing run matrix';
+  if (progress < 36) return 'sending prompts to providers';
+  if (progress < 62) return 'collecting responses';
+  if (progress < 86) return 'extracting mention and citation signals';
+  if (progress < 100) return 'saving run history';
+  return 'done';
+}
+
 export default function RunsPage() {
   const searchParams = useSearchParams();
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -11,6 +20,8 @@ export default function RunsPage() {
   const [runs, setRuns] = useState<RunWithPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState(false);
+  const [runProgress, setRunProgress] = useState(0);
+  const [runJobCount, setRunJobCount] = useState(0);
   const [selectedPrompts, setSelectedPrompts] = useState<number[]>([]);
   const [selectedProviders, setSelectedProviders] = useState<{ provider: Provider; model: string }[]>([]);
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
@@ -46,6 +57,20 @@ export default function RunsPage() {
     };
     run();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!executing) return;
+
+    const interval = setInterval(() => {
+      setRunProgress((prev) => {
+        if (prev >= 94) return prev;
+        const step = prev < 34 ? 4 : prev < 68 ? 3 : 2;
+        return Math.min(94, prev + step);
+      });
+    }, 280);
+
+    return () => clearInterval(interval);
+  }, [executing]);
 
   const togglePrompt = (promptId: number) => {
     if (selectedPrompts.includes(promptId)) {
@@ -88,6 +113,8 @@ export default function RunsPage() {
 
   const handleExecute = async () => {
     if (selectedPrompts.length === 0 || selectedProviders.length === 0) return;
+    setRunJobCount(selectedPrompts.length * selectedProviders.length);
+    setRunProgress(3);
     setExecuting(true);
     try {
       const response = await fetch('/api/runs', {
@@ -105,8 +132,12 @@ export default function RunsPage() {
       }
     } catch (error) {
       console.error('Failed to execute run:', error);
+    } finally {
+      setRunProgress(100);
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      setExecuting(false);
+      setRunProgress(0);
     }
-    setExecuting(false);
   };
 
   if (loading) {
@@ -213,6 +244,23 @@ export default function RunsPage() {
         >
           {executing ? 'Running...' : 'Run'}
         </button>
+        {executing && (
+          <div className="border border-[--dim] px-3 py-2 space-y-2">
+            <p className="text-xs text-[--dim]">
+              {getRunStage(runProgress)} ({runJobCount} calls)
+            </p>
+            <div className="w-full h-3 border border-[--dim] p-[1px]">
+              <div
+                className="h-full transition-all duration-200 ease-linear"
+                style={{
+                  width: `${Math.max(2, Math.round(runProgress))}%`,
+                  backgroundColor: 'var(--green)',
+                }}
+              />
+            </div>
+            <p className="text-xs text-[--green] text-right">{Math.round(runProgress)}%</p>
+          </div>
+        )}
       </div>
 
       <div>

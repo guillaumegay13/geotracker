@@ -19,6 +19,16 @@ interface BootstrapResponse {
   pages_scanned: number;
 }
 
+function getBootstrapStage(progress: number): string {
+  if (progress < 12) return 'booting scanner';
+  if (progress < 30) return 'reading homepage';
+  if (progress < 50) return 'analyzing key pages';
+  if (progress < 72) return 'extracting generic intents';
+  if (progress < 92) return 'generating non-branded prompts';
+  if (progress < 100) return 'saving collection';
+  return 'done';
+}
+
 export default function SettingsPage() {
   const [form, setForm] = useState<SettingsForm>({
     tracked_domain: '',
@@ -29,6 +39,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [bootstrapProgress, setBootstrapProgress] = useState(0);
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, boolean | null>>({});
@@ -47,6 +58,20 @@ export default function SettingsPage() {
         setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    if (!bootstrapping) return;
+
+    const interval = setInterval(() => {
+      setBootstrapProgress((prev) => {
+        if (prev >= 92) return prev;
+        const step = prev < 35 ? 4 : prev < 65 ? 3 : 2;
+        return Math.min(92, prev + step);
+      });
+    }, 280);
+
+    return () => clearInterval(interval);
+  }, [bootstrapping]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -75,6 +100,7 @@ export default function SettingsPage() {
     }
 
     setBootstrapping(true);
+    setBootstrapProgress(3);
     setBootstrap(null);
     setMessage(null);
 
@@ -95,9 +121,11 @@ export default function SettingsPage() {
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Failed to generate prompts';
       setMessage({ type: 'error', text });
+    } finally {
+      setBootstrapProgress(100);
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      setBootstrapping(false);
     }
-
-    setBootstrapping(false);
   };
 
   const handleTest = async (provider: 'openai' | 'anthropic' | 'perplexity') => {
@@ -163,6 +191,21 @@ export default function SettingsPage() {
               {bootstrapping ? 'Generating...' : 'Generate starter prompts'}
             </button>
           </div>
+          {bootstrapping && (
+            <div className="border border-[--dim] px-3 py-2 space-y-2">
+              <p className="text-xs text-[--dim]">{getBootstrapStage(bootstrapProgress)}</p>
+              <div className="w-full h-3 border border-[--dim] p-[1px]">
+                <div
+                  className="h-full transition-all duration-200 ease-linear"
+                  style={{
+                    width: `${Math.max(2, Math.round(bootstrapProgress))}%`,
+                    backgroundColor: 'var(--green)',
+                  }}
+                />
+              </div>
+              <p className="text-xs text-[--green] text-right">{Math.round(bootstrapProgress)}%</p>
+            </div>
+          )}
           {bootstrap && (
             <div className="text-sm space-y-2">
               <p className="text-[--green]">
